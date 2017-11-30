@@ -132,6 +132,7 @@ INSERT INTO Games(GameDate) values ('12.06.2017')
 INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (6, 3, 6, 1, 0)
 INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (6, 4, 6, 2, 0)
 
+---Функции---
 
 IF OBJECT_ID (N'dbo.GetPointsCommand', N'FN') IS NOT NULL
 	DROP FUNCTION dbo.GetPointsCommand
@@ -152,6 +153,32 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID (N'dbo.GetCountGoalsOnEnemyField', N'FN') IS NOT NULL
+    DROP FUNCTION dbo.GetCountGoalsOnEnemyField
+GO
+CREATE FUNCTION dbo.GetCountGoalsOnEnemyField(@CommandID int)  
+RETURNS INT
+BEGIN
+    return (SELECT SUM(t1.Goals)
+                FROM GamesData t1
+                INNER JOIN GamesData t2 ON t1.GameID = t2.GameID
+                WHERE t1.TeamID = @CommandID AND t1.TeamID != t2.TeamID AND t1.TeamType = 2)
+END;
+GO
+ 
+IF OBJECT_ID (N'dbo.GetWinsCommand', N'FN') IS NOT NULL
+    DROP FUNCTION dbo.GetWinsCommand
+GO
+CREATE FUNCTION dbo.GetWinsCommand(@CommandID int)  
+RETURNS INT
+BEGIN
+    return (SELECT Count(t1.TeamID)
+                            FROM GamesData t1
+                            INNER JOIN GamesData t2 ON t1.GameID = t2.GameID
+                            WHERE t1.Goals > t2.Goals AND t1.TeamID = @CommandID AND t1.TeamID != t2.TeamID)
+END;
+GO
+
 ---Рейтинговая таблица---
 
 IF OBJECT_ID (N'dbo.GamesTab', N'U') IS NOT NULL
@@ -162,8 +189,11 @@ CREATE VIEW dbo.GamesTab
 AS
 SELECT Teams.TeamName AS 'Команда',
 	dbo.GetPointsCommand(t1.TeamID) AS 'Очки',
+	dbo.GetWinsCommand(t1.TeamID) AS 'Победы',
+	dbo.GetCountGoalsOnEnemyField(t1.TeamID) AS 'Голы на поле соперника',
 	SUM(t1.Goals) AS 'Забито',
-	SUM(t2.Goals) AS 'Пропущено'
+	SUM(t2.Goals) AS 'Пропущено',
+	SUM(t1.Goals) - SUM(t2.Goals) AS 'Забито-пропущено'
 FROM GamesData t1
 	INNER JOIN GamesData t2 ON t1.GameID = t2.GameID
 	INNER JOIN Teams ON t1.TeamID = Teams.ID
@@ -179,7 +209,7 @@ CREATE VIEW dbo.GamesTabSort
 AS
 SELECT TOP 100 *
 FROM GamesTab
-ORDER BY 'Очки' DESC
+ORDER BY 'Очки' DESC, 'Победы' DESC, 'Голы на поле соперника' DESC, 'Пропущено' ASC
 GO
 
 SELECT *
