@@ -1,0 +1,17 @@
+CREATE VIEW Bombardiers
+AS
+SELECT Players.Surname AS 'Фамилия',
+       Players.Name AS 'Имя',
+       Players.Patronymic AS 'Отчество',
+       team.Name AS 'Принадлежность',
+       enemy.Name AS 'Играл против команды',
+       FORMAT(Games.DateGame, 'dd.MM.yyyy') AS 'Дата матча'
+FROM MatchCommand t1
+    INNER JOIN MatchCommand t2 ON t1.IDMatch = t2.IDMatch
+    INNER JOIN Commands team ON t1.IDCommand = team.ID
+    INNER JOIN Commands enemy ON t2.IDCommand = enemy.ID
+    INNER JOIN Goals ON t1.IDMatch = Goals.IDMatch
+    INNER JOIN Players ON Goals.IDPlayer = Players.ID
+    INNER JOIN Games ON Games.ID = t1.IDMatch
+WHERE t1.IDCommand != t2.IDCommand AND t1.IDCommand = Players.Command
+GO
