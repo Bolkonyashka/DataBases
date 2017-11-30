@@ -25,6 +25,16 @@ IF OBJECT_ID (N'Players', N'U') IS NOT NULL
 IF OBJECT_ID (N'Teams', N'U') IS NOT NULL 
    DROP TABLE [dbo].Teams
 
+IF OBJECT_ID (N'GlobalVars', N'U') IS NOT NULL 
+   DROP TABLE [dbo].GlobalVars
+
+CREATE TABLE GlobalVars
+(
+	TargDate smalldatetime
+)
+GO
+INSERT INTO GlobalVars values ('01.06.2017')
+
 CREATE TABLE [dbo].Teams(
 	ID int IDENTITY(1,1),
 	TeamName [nvarchar](50) NOT NULL
@@ -110,27 +120,27 @@ INSERT INTO TeamTypes(TeamType) values ('Guest')
 
 INSERT INTO Games(GameDate) values ('05.06.2017')
 INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (1, 1, 6, 1, 3)
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (1, 2, 6, 2, 1)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (1, 2, 12, 2, 1)
 
 INSERT INTO Games(GameDate) values ('06.06.2017')
 INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (2, 1, 6, 2, 1)
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (2, 3, 6, 1, 1)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (2, 3, 18, 1, 1)
 
 INSERT INTO Games(GameDate) values ('07.06.2017')
 INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (3, 1, 6, 1, 2)
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (3, 4, 6, 2, 3)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (3, 4, 24, 2, 3)
 
 INSERT INTO Games(GameDate) values ('08.06.2017')
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (4, 2, 6, 1, 5)
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (4, 3, 6, 2, 3)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (4, 2, 12, 1, 5)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (4, 3, 18, 2, 3)
 
 INSERT INTO Games(GameDate) values ('09.06.2017')
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (5, 2, 6, 2, 4)
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (5, 4, 6, 1, 0)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (5, 2, 12, 2, 4)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (5, 4, 24, 1, 0)
 
 INSERT INTO Games(GameDate) values ('12.06.2017')
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (6, 3, 6, 1, 0)
-INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (6, 4, 6, 2, 0)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (6, 3, 18, 1, 0)
+INSERT INTO GamesData(GameID, TeamID, Goalkeeper, TeamType, Goals) values (6, 4, 24, 2, 0)
 
 ---Функции---
 
@@ -138,17 +148,19 @@ IF OBJECT_ID (N'dbo.GetPointsCommand', N'FN') IS NOT NULL
 	DROP FUNCTION dbo.GetPointsCommand
 GO
 
-CREATE FUNCTION dbo.GetPointsCommand(@CommandID int)  
+CREATE FUNCTION dbo.GetPointsCommand(@CommandID int, @Date smalldatetime)  
 RETURNS INT
 BEGIN
 	declare @pointsWins int = (SELECT Count(t1.TeamID)
 							FROM GamesData t1
 							INNER JOIN GamesData t2 ON t1.GameID = t2.GameID
-							WHERE t1.Goals > t2.Goals AND t1.TeamID = @CommandID AND t1.TeamID != t2.TeamID)
+							INNER JOIN Games g ON t1.GameID = g.ID
+							WHERE t1.Goals > t2.Goals AND t1.TeamID = @CommandID AND t1.TeamID != t2.TeamID AND @Date >= g.GameDate)
 	declare @pointsDraws int = (SELECT Count(t1.TeamID)
 							FROM GamesData t1
 							INNER JOIN GamesData t2 ON t1.GameID = t2.GameID
-							WHERE t1.Goals = t2.Goals AND t1.TeamID = @CommandID AND t1.TeamID != t2.TeamID)
+							INNER JOIN Games g ON t1.GameID = g.ID
+							WHERE t1.Goals = t2.Goals AND t1.TeamID = @CommandID AND t1.TeamID != t2.TeamID  AND @Date >= g.GameDate)
 	return @pointsWins*3 + @pointsDraws;
 END;
 GO
@@ -179,6 +191,10 @@ BEGIN
 END;
 GO
 
+---Дата---
+
+UPDATE GlobalVars SET TargDate = '12.06.2017'
+
 ---Рейтинговая таблица---
 
 IF OBJECT_ID (N'dbo.GamesTab', N'U') IS NOT NULL
@@ -188,17 +204,21 @@ GO
 CREATE VIEW dbo.GamesTab
 AS
 SELECT Teams.TeamName AS 'Команда',
-	dbo.GetPointsCommand(t1.TeamID) AS 'Очки',
-	dbo.GetWinsCommand(t1.TeamID) AS 'Победы',
-	dbo.GetCountGoalsOnEnemyField(t1.TeamID) AS 'Голы на поле соперника',
+	dbo.GetPointsCommand(t1.TeamID, GlobalVars.TargDate) AS 'Очки',
+	--dbo.GetWinsCommand(t1.TeamID) AS 'Победы',
+	COUNT(case when t1.Goals > t2.Goals then t1.TeamID end) AS 'Победы',
+	--dbo.GetCountGoalsOnEnemyField(t1.TeamID) AS 'Голы на поле соперника',
+	SUM(case when t1.TeamType = 2 then t1.Goals else 0 end) AS 'Голы на поле соперника',
 	SUM(t1.Goals) AS 'Забито',
 	SUM(t2.Goals) AS 'Пропущено',
 	SUM(t1.Goals) - SUM(t2.Goals) AS 'Забито-пропущено'
 FROM GamesData t1
 	INNER JOIN GamesData t2 ON t1.GameID = t2.GameID
 	INNER JOIN Teams ON t1.TeamID = Teams.ID
-WHERE t1.TeamID != t2.TeamID
-GROUP BY Teams.TeamName, t1.TeamID
+	INNER JOIN Games ON t1.GameID = Games.ID
+	, GlobalVars
+WHERE t1.TeamID != t2.TeamID AND GlobalVars.TargDate >= Games.GameDate
+GROUP BY Teams.TeamName, t1.TeamID, GlobalVars.TargDate
 GO
 
 IF OBJECT_ID (N'dbo.GamesTabSort', N'U') IS NOT NULL
@@ -233,7 +253,9 @@ FROM GamesData t1
 	INNER JOIN Teams t1n ON t1.TeamID = t1n.ID
 	INNER JOIN Teams t2n ON t2.TeamID = t2n.ID
 	INNER JOIN GamesTabSort gts ON t1n.TeamName = gts.Команда
-WHERE t1.TeamID != t2.TeamID 
+	INNER JOIN Games ON t1.GameID = Games.ID
+	, GlobalVars
+WHERE t1.TeamID != t2.TeamID AND GlobalVars.TargDate >= Games.GameDate
 --AND t1.TeamType = 1
 GROUP BY t1n.TeamName, t1.Goals, t2n.TeamName, t2.Goals, gts.Очки
 GO
@@ -276,3 +298,28 @@ SET @DynamicPivotQuery =
 PRINT(@DynamicPivotQuery)
 
 EXEC sp_executesql @DynamicPivotQuery
+
+---Вратари---
+
+IF OBJECT_ID (N'dbo.Goalkeepers', N'U') IS NOT NULL
+	DROP VIEW dbo.Goalkeepers
+GO
+
+CREATE VIEW Goalkeepers
+AS
+SELECT Players.Surname AS 'Фамилия',
+       Players.Name AS 'Имя',
+       team.TeamName AS 'Принадлежность',
+       enemy.TeamName AS 'Играл против команды',
+       Games.GameDate AS 'Дата матча'
+FROM GamesData t1
+    INNER JOIN GamesData t2 ON t1.GameID = t2.GameID
+    INNER JOIN Teams team ON t1.TeamID = team.ID
+    INNER JOIN Teams enemy ON t2.TeamID = enemy.ID
+    INNER JOIN Players ON t1.Goalkeeper = Players.ID
+    INNER JOIN Games ON Games.ID = t1.GameID
+WHERE t1.TeamID != t2.TeamID
+GO
+
+SELECT *
+FROM Goalkeepers
