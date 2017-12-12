@@ -380,15 +380,18 @@ INSERT INTO SailingRegistration(BoatName, DateFrom, DateTo) values ('√алка', '09
 ----------------------«апросы-----------------------
 
 --1) ѕо указанному типу и интервалу дат вывести все катера, осуществл€вшие выход в море, указав дл€ каждого в хронологическом пор€дке записи о выход в море и значением улова.
-DECLARE @type nvarchar
+DECLARE @type nvarchar(50)
 DECLARE @SDate smalldatetime
 DECLARE @EDate smalldatetime
 
-SET @type = '— подвесным мотором'
+SET @type = 1
 SET @SDate = '01.07.2017'
-SET @EDate = '10.07.2017'
+SET @EDate = '11.07.2017'
 
-
-
+SELECT DISTINCT sr.BoatName
+FROM SailingRegistration sr
+	INNER JOIN BoatsPasports bp ON sr.BoatName = bp.BoatName
+WHERE DateFrom >= @SDate AND DateTo <= @EDate AND bp.BoatType = @type
+GO
 
 ----------------------------------------------------
