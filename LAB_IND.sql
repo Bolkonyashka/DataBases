@@ -379,19 +379,178 @@ INSERT INTO SailingRegistration(BoatName, DateFrom, DateTo) values ('Галка', '09
 
 ----------------------Запросы-----------------------
 
---1) По указанному типу и интервалу дат вывести все катера, осуществлявшие выход в море, указав для каждого в хронологическом порядке записи о выход в море и значением улова.
-DECLARE @type nvarchar(50)
-DECLARE @SDate smalldatetime
-DECLARE @EDate smalldatetime
+IF OBJECT_ID (N'GlobalVars', N'U') IS NOT NULL 
+   DROP TABLE [dbo].GlobalVars
 
-SET @type = 1
-SET @SDate = '01.07.2017'
-SET @EDate = '11.07.2017'
-
-SELECT DISTINCT sr.BoatName
-FROM SailingRegistration sr
-	INNER JOIN BoatsPasports bp ON sr.BoatName = bp.BoatName
-WHERE DateFrom >= @SDate AND DateTo <= @EDate AND bp.BoatType = @type
+CREATE TABLE GlobalVars
+(
+	StartDate smalldatetime,
+	EndDate smalldatetime,
+	BType int,
+	FPName nvarchar(50),
+	FType nvarchar(50)
+)
 GO
 
+INSERT INTO GlobalVars values ('01.01.2000', '01.01.2000', 0, 'Нет', 'Нет')
+
+--1) По указанному типу и интервалу дат вывести все катера, осуществлявшие выход в море, указав для каждого в хронологическом порядке записи о выход в море и значением улова.
+
+UPDATE GlobalVars SET StartDate = '01.07.2017 00:00', EndDate = '20.07.2017 23:59', BType = 2
+
+IF OBJECT_ID (N'dbo.WeightsSum', N'V') IS NOT NULL
+	DROP VIEW WeightsSum
+GO
+
+CREATE VIEW WeightsSum
+AS
+SELECT DISTINCT sr.BoatName, bp.BoatType, FORMAT(sr.DateTo, 'dd.MM.yy') AS DateTo, CONVERT(nvarchar(50), SUM(cw.CatchWeight)) + ' кг.' AS [Суммарный вес]
+FROM SailingRegistration sr
+	INNER JOIN BoatsPasports bp ON sr.BoatName = bp.BoatName
+	INNER JOIN CatchWeight cw ON sr.ID = cw.SailingID,
+	GlobalVars gw
+WHERE sr.DateFrom >= gw.StartDate AND sr.DateTo <= gw.EndDate AND bp.BoatType = gw.BType
+GROUP BY sr.BoatName, bp.BoatType, sr.DateTo
+GO
+
+
+DECLARE @DynamicPivotQuery AS NVARCHAR(MAX)
+DECLARE @ColumnName AS NVARCHAR(MAX)
+DECLARE @SelectColumnName AS NVARCHAR(MAX)
+
+SELECT @ColumnName= ISNULL(@ColumnName + ', ','') 
+       + QUOTENAME(DateTo)
+FROM (SELECT DISTINCT DateTo FROM WeightsSum) AS dates
+--SET @ColumnName = REPLACE(@ColumnName, ' ', '')
+--PRINT(@ColumnName)
+
+SELECT @SelectColumnName = ISNULL(@SelectColumnName + ',','') 
+	   + 'ISNULL(' + QUOTENAME(DateTo) + ', '' '') AS '
+       + QUOTENAME(DateTo)
+FROM (SELECT DISTINCT DateTo FROM WeightsSum) AS dates
+
+SET @DynamicPivotQuery = 
+  N'SELECT BoatName AS [Название катера], ' + @SelectColumnName + '
+    FROM dbo.WeightsSum
+    PIVOT (MAX([Суммарный вес]) FOR DateTo in (' + @ColumnName + ')
+       ) AS test_pivot
+	ORDER BY BoatName'
+PRINT(@DynamicPivotQuery)
+
+EXEC sp_executesql @DynamicPivotQuery
+
 ----------------------------------------------------
+
+--2) Для указанного интервала дат вывести для каждого сорта рыбы список катеров с наибольшим уловом.
+
+UPDATE GlobalVars SET StartDate = '01.07.2017 00:00', EndDate = '15.07.2017 23:59', BType = 2
+
+IF OBJECT_ID (N'dbo.WeightTypeSum', N'V') IS NOT NULL
+	DROP VIEW WeightTypeSum
+GO
+
+CREATE VIEW WeightTypeSum
+AS
+SELECT DISTINCT cw.CatchType AS [Сорт рыбы], MAX(cw.CatchWeight) AS maxim
+FROM CatchWeight cw
+	INNER JOIN SailingRegistration sr ON cw.SailingID = sr.ID,
+	GlobalVars gw
+WHERE sr.DateFrom >= gw.StartDate AND sr.DateTo <= gw.EndDate
+GROUP BY cw.CatchType
+GO
+
+IF OBJECT_ID (N'dbo.WeightTypeSumAndBoat', N'V') IS NOT NULL
+	DROP VIEW WeightTypeSumAndBoat
+GO
+
+CREATE VIEW WeightTypeSumAndBoat
+AS
+SELECT wts.[Сорт рыбы], sr.BoatName AS [Название катера], CONVERT(nvarchar(50), wts.maxim) + ' кг.' AS [Наибольший улов]
+FROM WeightTypeSum wts
+	INNER JOIN CatchWeight cw ON wts.[Сорт рыбы] = cw.CatchType AND wts.maxim = cw.CatchWeight
+	INNER JOIN SailingRegistration sr ON cw.SailingID = sr.ID
+GO
+
+SELECT * 
+FROM WeightTypeSumAndBoat
+
+----------------------------------------------------
+
+--3) Для указанного интервала дат вывести список банок, с указанием среднего улова за этот период. Для каждой банки вывести список катеров, осуществлявших лов.
+
+UPDATE GlobalVars SET StartDate = '01.07.2017 00:00', EndDate = '20.07.2017 23:59', BType = 2, FPName = 'Песчаная'
+
+IF OBJECT_ID (N'dbo.FPlacesAVG', N'V') IS NOT NULL
+	DROP VIEW FPlacesAVG
+GO
+
+CREATE VIEW FPlacesAVG
+AS
+SELECT fp.PlaceName AS [Название банки], AVG(fpr.CatchCount) AS [Средний улов]
+FROM FPlacesRegistration fpr
+	INNER JOIN FishPlaces fp ON fpr.FishPlaceID = fp.ID
+	INNER JOIN SailingRegistration sr ON fpr.SailingID = sr.ID,
+	GlobalVars gw
+WHERE fpr.DateTo >= gw.StartDate AND fpr.DateFrom <= gw.EndDate
+GROUP BY fp.PlaceName
+GO
+
+SELECT [Название банки],  CONVERT(nvarchar(50), [Средний улов]) + ' шт.' AS [Средний улов]
+FROM FPlacesAVG
+
+IF OBJECT_ID (N'dbo.FPlaceVisitors', N'V') IS NOT NULL
+	DROP VIEW FPlaceVisitors
+GO
+
+CREATE VIEW FPlaceVisitors
+AS
+SELECT DISTINCT bp.BoatName AS [Название катера], SUM(fpr.CatchCount) AS [Улов]
+FROM BoatsPasports bp
+	INNER JOIN SailingRegistration sr ON bp.BoatName = sr.BoatName
+	INNER JOIN FPlacesRegistration fpr ON sr.ID = fpr.SailingID
+	INNER JOIN FishPlaces fp ON fpr.FishPlaceID = fp.ID,
+	GlobalVars gw
+WHERE fp.PlaceName = gw.FPName AND fpr.DateTo >= gw.StartDate AND fpr.DateFrom <= gw.EndDate
+GROUP BY bp.BoatName
+GO
+
+SELECT [Название катера], CONVERT(nvarchar(50), [Улов]) + ' шт.' AS [Улов]
+FROM FPlaceVisitors
+
+----------------------------------------------------
+
+--4) Для заданной банки вывести список катеров, которые получили улов выше среднего.
+
+UPDATE GlobalVars SET StartDate = '01.07.2017 00:00', EndDate = '20.07.2017 23:59', BType = 2, FPName = 'Песчаная'
+
+SELECT [Название катера],  CONVERT(nvarchar(50), [Улов]) + ' шт.' AS [Улов]
+FROM FPlaceVisitors fpv,
+		FPlacesAVG fpa,
+		GlobalVars gv
+WHERE fpv.[Улов] > fpa.[Средний улов] AND fpa.[Название банки] = gv.FPName
+
+----------------------------------------------------
+
+--5) Вывести список сортов рыбы и для каждого сорта – список рейсов с указанием даты выхода и возвращения, величины улова. При этом список показанных рейсов должен быть ограничен интервалом дат.
+
+UPDATE GlobalVars SET StartDate = '01.07.2017 00:00', EndDate = '05.07.2017 23:59', BType = 2, FPName = 'Песчаная', FType = 'Лосось'
+
+SELECT FishName
+FROM CatchType
+
+IF OBJECT_ID (N'dbo.FishTypeSailings', N'V') IS NOT NULL
+	DROP VIEW FishTypeSailings
+GO
+
+CREATE VIEW FishTypeSailings
+AS
+SELECT BoatName AS [Название катера], FORMAT(DateFrom, 'dd.MM.yy   hh:mm') AS [Дата отплытия], FORMAT(DateTo , 'dd.MM.yy   hh:mm') AS [Дата возвращения], SUM(cw.CatchWeight) AS [Величина улова]
+FROM SailingRegistration sr
+	INNER JOIN CatchWeight cw ON sr.ID = cw.SailingID,
+	GlobalVars gv
+WHERE cw.CatchType = gv.FType AND sr.DateFrom >= gv.StartDate AND sr.DateTo <= gv.EndDate
+GROUP BY BoatName, DateFrom, DateTo
+GO
+
+SELECT *
+FROM FishTypeSailings
